@@ -1,0 +1,83 @@
+name: Prediction — Causality Analyzer
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 8 * * 1'  # Weekly on Monday
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  predict:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      SYSTEM: market
+      DATES: cloudbed-2
+      SLICE_KEY: market-cb2
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # ── 1. Restore dataset cache ──
+      - uses: actions/cache@v4
+        id: dataset-cache
+        with:
+          path: dataset/
+          key: market-cb2-v1
+
+      # ── 2. Download dataset on cache miss ──
+      - name: Download dataset from Google Drive
+        if: steps.dataset-cache.outputs.cache-hit != 'true'
+        run: bash scripts/download-dataset.sh
+
+      # ── 3. Setup runtimes ──
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # ── 4. Clone causality-analyzer ──
+      - name: Clone causality-analyzer
+        run: git clone https://github.com/AgentiX-E/causality-analyzer.git
+
+      # ── 5. Build CA ──
+      - name: Build Causality Analyzer
+        run: |
+          cd causality-analyzer
+          pnpm config set approve-builds true
+          pnpm install --frozen-lockfile
+          pnpm run --filter @agentix-e/causality-analyzer-core build
+          pnpm run --filter @agentix-e/causality-analyzer-pipeline build
+
+      # ── 6. Install OpenRCA deps + clone framework ──
+      - name: Install OpenRCA dependencies
+        run: |
+          cd causality-analyzer
+          cp -r ../dataset ./
+          pip install pandas openai loguru tqdm
+          git clone https://github.com/microsoft/OpenRCA.git OpenRCA-framework || true
+
+      # ── 7. Run CA-LLM RCA Agent ──
+      - name: Run CA-LLM RCA Agent
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        run: |
+          cd causality-analyzer
+          python OpenRCA-framework/rca/run_ca_agent.py --dataset Market/cloudbed-2 --tag ca-llm
+
+      # ── 8. Upload predictions ──
+      - name: Upload predictions artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: predictions-causality-analyzer-market-cb2
+          path: causality-analyzer/test/result/*/agent-ca-llm-*.csv
+          retention-days: 90

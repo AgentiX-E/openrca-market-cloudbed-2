@@ -1,0 +1,23 @@
+# OpenRCA dataset (downloaded at runtime, cached via actions/cache)
+dataset/
+
+# Cloned project repos (used for prediction)
+causality-analyzer/
+micro-kinetic-py/
+micro-kinetic-ts/
+
+# OpenRCA framework clone
+OpenRCA-framework/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Node
+node_modules/
+
+# OS
+.DS_Store
+Thumbs.db

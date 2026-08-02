@@ -1,0 +1,78 @@
+name: Prediction — MicroKinetic Python
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 8 * * 1'  # Weekly on Monday
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  predict:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      SYSTEM: market
+      DATES: cloudbed-2
+      SLICE_KEY: market-cb2
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # ── 1. Restore dataset cache ──
+      - uses: actions/cache@v4
+        id: dataset-cache
+        with:
+          path: dataset/
+          key: market-cb2-v1
+
+      # ── 2. Download dataset on cache miss ──
+      - name: Download dataset from Google Drive
+        if: steps.dataset-cache.outputs.cache-hit != 'true'
+        run: bash scripts/download-dataset.sh
+
+      # ── 3. Setup runtimes ──
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # ── 4. Clone micro-kinetic-py ──
+      - name: Clone micro-kinetic-py
+        run: git clone https://github.com/AgentiX-E/micro-kinetic-py.git
+
+      # ── 5. Build micro-kinetic-py ──
+      - name: Build micro-kinetic-py
+        run: |
+          cd micro-kinetic-py
+          pip install -e .
+
+      # ── 6. Copy dataset + setup OpenRCA ──
+      - name: Setup dataset for micro-kinetic-py
+        run: |
+          cd micro-kinetic-py
+          cp -r ../dataset ./
+
+      # ── 7. Run MicroKinetic Python Agent ──
+      - name: Run MicroKinetic Python Agent
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        run: |
+          cd micro-kinetic-py
+          python -m benchmark.run_openrca_agent --dataset Market/cloudbed-2
+
+      # ── 8. Upload predictions ──
+      - name: Upload predictions artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: predictions-micro-kinetic-py-market-cb2
+          path: micro-kinetic-py/results/*.csv
+          retention-days: 90

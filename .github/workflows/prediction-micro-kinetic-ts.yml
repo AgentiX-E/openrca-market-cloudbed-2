@@ -1,0 +1,80 @@
+name: Prediction — MicroKinetic TypeScript
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 8 * * 1'  # Weekly on Monday
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  predict:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      SYSTEM: market
+      DATES: cloudbed-2
+      SLICE_KEY: market-cb2
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # ── 1. Restore dataset cache ──
+      - uses: actions/cache@v4
+        id: dataset-cache
+        with:
+          path: dataset/
+          key: market-cb2-v1
+
+      # ── 2. Download dataset on cache miss ──
+      - name: Download dataset from Google Drive
+        if: steps.dataset-cache.outputs.cache-hit != 'true'
+        run: bash scripts/download-dataset.sh
+
+      # ── 3. Setup runtimes ──
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # ── 4. Clone micro-kinetic-ts ──
+      - name: Clone micro-kinetic-ts
+        run: git clone https://github.com/AgentiX-E/micro-kinetic-ts.git
+
+      # ── 5. Build micro-kinetic-ts ──
+      - name: Build micro-kinetic-ts
+        run: |
+          cd micro-kinetic-ts
+          pnpm config set approve-builds true
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      # ── 6. Copy dataset ──
+      - name: Setup dataset for micro-kinetic-ts
+        run: |
+          cd micro-kinetic-ts
+          cp -r ../dataset ./
+
+      # ── 7. Run MicroKinetic TypeScript Agent ──
+      - name: Run MicroKinetic TypeScript Agent
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        run: |
+          cd micro-kinetic-ts
+          npx tsx benchmark/run-openrca-agent.ts --dataset Market/cloudbed-2
+
+      # ── 8. Upload predictions ──
+      - name: Upload predictions artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: predictions-micro-kinetic-ts-market-cb2
+          path: micro-kinetic-ts/results/*.csv
+          retention-days: 90
