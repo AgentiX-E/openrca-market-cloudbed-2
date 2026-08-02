@@ -1,0 +1,66 @@
+name: Cache Dataset — Market (cloudbed-2)
+
+on:
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Force re-download even if cache exists'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  cache:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      SYSTEM: Market
+      SLICE_KEY: market-cb2
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # ── 1. Restore existing cache ──
+      - uses: actions/cache/restore@v4
+        id: dataset-cache-restore
+        with:
+          path: dataset/
+          key: market-cb2-v1
+
+      # ── 2. Download + filter on cache miss or force ──
+      - name: Download and filter dataset
+        if: steps.dataset-cache-restore.outputs.cache-hit != 'true' || inputs.force
+        run: bash scripts/download-dataset.sh
+
+      # ── 3. Save to cache ──
+      - name: Save dataset to actions cache
+        if: always() && steps.dataset-cache-restore.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: dataset/
+          key: market-cb2-v1
+
+      # ── 4. Report ──
+      - name: Report cache status
+        if: always()
+        run: |
+          echo "=== Cache Report ==="
+          echo "Slice: market-cb2"
+          echo "System: Market (cloudbed-2)"
+          echo "Dates: 2022_03_20, 2022_03_21"
+          if [ "${{ steps.dataset-cache-restore.outputs.cache-hit }}" = "true" ]; then
+            echo "Status: Cache HIT — no download needed"
+          else
+            echo "Status: Cache MISS — downloaded and saved"
+          fi
+          if [ -d dataset/ ]; then
+            echo ""
+            echo "=== Dataset tree ==="
+            find dataset/ -type d | sort | head -20
+            echo ""
+            echo "Dataset size:"
+            du -sh dataset/ 2>/dev/null || true
+          fi
