@@ -20,9 +20,9 @@ echo "   Target: Market — cloudbed-2 (2022_03_20, 2022_03_21)"
 pip3 install --quiet gdown
 
 # Download entire OpenRCA dataset (68 GB total, filtered after)
-gdown --folder "${GOOGLE_DRIVE_FOLDER}" \
+gdown --folder "${GOOGLE_DRIVE_FOLDER}" --no-cookies \
       -O "${DATASET_ROOT}/" \
-      --remaining-ok
+      --continue
 
 echo ""
 echo "📂 Filtering to keep only target dates..."
