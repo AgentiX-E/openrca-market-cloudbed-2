@@ -53,7 +53,7 @@ jobs:
       - name: Build micro-kinetic-py
         run: |
           cd micro-kinetic-py
-          pip install -e .
+          pip3 install -e .
 
       # ── 6. Copy dataset + setup OpenRCA ──
       - name: Setup dataset for micro-kinetic-py

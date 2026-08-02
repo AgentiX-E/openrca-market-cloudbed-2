@@ -15,7 +15,7 @@ permissions:
 jobs:
   cache:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 240
     env:
       SYSTEM: Market
       SLICE_KEY: market-cb2

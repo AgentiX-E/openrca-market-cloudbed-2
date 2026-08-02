@@ -63,7 +63,7 @@ jobs:
         run: |
           cd causality-analyzer
           cp -r ../dataset ./
-          pip install pandas openai loguru tqdm
+          pip3 install pandas openai loguru tqdm
           git clone https://github.com/microsoft/OpenRCA.git OpenRCA-framework || true
 
       # ── 7. Run CA-LLM RCA Agent ──

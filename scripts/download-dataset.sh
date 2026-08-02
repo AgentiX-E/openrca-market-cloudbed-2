@@ -17,10 +17,10 @@ echo "   Folder ID: ${GOOGLE_DRIVE_FOLDER}"
 echo "   Target: Market — cloudbed-2 (2022_03_20, 2022_03_21)"
 
 # Install gdown if missing
-pip install -q gdown
+pip3 install --quiet gdown
 
 # Download entire OpenRCA dataset (68 GB total, filtered after)
-gdown --folder "https://drive.google.com/drive/folders/${GOOGLE_DRIVE_FOLDER}" \
+gdown --folder "${GOOGLE_DRIVE_FOLDER}" \
       -O "${DATASET_ROOT}/" \
       --remaining-ok
 
