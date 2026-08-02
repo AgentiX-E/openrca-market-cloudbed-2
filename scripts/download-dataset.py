@@ -1,177 +1,161 @@
 #!/usr/bin/env python3
-"""Selective OpenRCA dataset downloader.
+"""Selective OpenRCA dataset downloader (v4).
 
-Uses gdown --json to list ALL files in the Google Drive folder,
-then downloads ONLY files matching the target date paths.
-This avoids downloading the entire 68GB dataset.
+Uses gdown.download_folder(skip_download=True) to list files WITHOUT downloading,
+filters by target system/date paths, then downloads only matching files.
 
 Usage:
-    python3 scripts/download-dataset.py <folder_id> <system> <dates...>
+    python3 scripts/download-dataset.py <folder_id> <system> [cloudbed] <dates...>
 
-Target path filter:
+Target path filters:
     Telecom → dataset/Telecom/telemetry/{date}/
     Bank    → dataset/Bank/telemetry/{date}/
     Market  → dataset/Market/{cloudbed}/telemetry/{date}/
 """
 
-import json
 import os
-import subprocess
 import sys
+import subprocess
 from pathlib import Path
 
 FOLDER_ID = sys.argv[1] if len(sys.argv) > 1 else "1wGiEnu4OkWrjPxfx5ZTROnU37-5UDoPM"
 SYSTEM = sys.argv[2] if len(sys.argv) > 2 else "Telecom"
-CLOUDBED = sys.argv[3] if len(sys.argv) > 3 else ""  # cloudbed-1 / cloudbed-2
-TARGET_DATES = sys.argv[4:] if len(sys.argv) > 4 else []
+CLOUDBED = sys.argv[3] if len(sys.argv) > 3 and sys.argv[3] else ""
+TARGET_DATES = set(sys.argv[4:]) if len(sys.argv) > 4 else set()
 
 print("=" * 60)
-print("OpenRCA Selective Dataset Downloader")
+print("OpenRCA Selective Dataset Downloader (v4)")
 print("=" * 60)
 print(f"  Folder:   {FOLDER_ID}")
 print(f"  System:   {SYSTEM}")
 print(f"  CloudBed: {CLOUDBED or '(none)'}")
-print(f"  Dates:    {TARGET_DATES}")
+print(f"  Dates:    {sorted(TARGET_DATES)}")
+
+# Build path prefix filter
+if CLOUDBED:
+    PATH_PREFIX = f"dataset/{SYSTEM}/{CLOUDBED}/"
+else:
+    PATH_PREFIX = f"dataset/{SYSTEM}/"
 
 
-def build_path_filter():
-    """Build the path prefix that files must match to be downloaded."""
-    if CLOUDBED:
-        return f"dataset/{SYSTEM}/{CLOUDBED}/"
-    return f"dataset/{SYSTEM}/"
-
-
-def list_folder_files(folder_id: str):
-    """List all files in a Google Drive folder using gdown --json."""
-    print(f"\n📋 Listing folder contents...")
-    result = subprocess.run(
-        ["gdown", "--folder", "--json", folder_id],
-        capture_output=True,
-        text=True,
-        timeout=120,
-    )
-
-    if result.returncode != 0:
-        print(f"[ERROR] gdown --json failed (exit {result.returncode})")
-        print(f"  stdout: {result.stdout[:500]}")
-        print(f"  stderr: {result.stderr[:500]}")
-        return []
+def list_files(folder_id: str):
+    """List all files in folder using gdown Python API (no download)."""
+    print(f"\n📋 Listing folder contents (skip_download mode)...")
 
     try:
-        data = json.loads(result.stdout)
-    except json.JSONDecodeError as e:
-        print(f"[ERROR] Failed to parse JSON: {e}")
-        print(f"  Raw output (first 500 chars): {result.stdout[:500]}")
+        import gdown
+        entries = gdown.download_folder(
+            id=folder_id,
+            output="/tmp/gdown_list",
+            quiet=True,
+            use_cookies=False,
+            skip_download=True,
+        )
+
+        if not entries:
+            print("[ERROR] gdown returned empty list")
+            return []
+
+        # entries is a list of GoogleDriveFileToDownload named tuples
+        # Each has: id, path, local_path
+        result = []
+        for e in entries:
+            result.append({
+                "id": e.id,
+                "path": e.path,
+            })
+
+        print(f"  Total entries: {len(result)}")
+        return result
+
+    except ImportError:
+        print("[FATAL] gdown not installed")
+        sys.exit(1)
+    except Exception as e:
+        print(f"[ERROR] Listing failed: {type(e).__name__}: {e}")
         return []
 
-    print(f"  Total entries in folder: {len(data)}")
-    return data
 
-
-def download_file(file_id: str, output_path: str):
-    """Download a single file from Google Drive by ID."""
+def download_one(file_id: str, output_path: str) -> bool:
+    """Download a single file by Google Drive ID."""
     out_dir = os.path.dirname(output_path)
     os.makedirs(out_dir, exist_ok=True)
 
-    result = subprocess.run(
-        ["gdown", "--no-cookies", file_id, "-O", output_path],
-        capture_output=True,
-        text=True,
-        timeout=300,
-    )
-    return result.returncode == 0
+    if os.path.exists(output_path):
+        return True  # Already downloaded
+
+    try:
+        import gdown
+        gdown.download(id=file_id, output=output_path, quiet=True, use_cookies=False)
+        return os.path.exists(output_path)
+    except Exception as e:
+        print(f"    ❌ Download error: {e}")
+        return False
 
 
 def main():
-    # Step 1: List all files
-    entries = list_folder_files(FOLDER_ID)
+    # Step 1: List
+    entries = list_files(FOLDER_ID)
     if not entries:
         print("\n[FATAL] Cannot list folder contents. Aborting.")
         sys.exit(1)
 
-    # Step 2: Filter files by target path
-    path_filter = build_path_filter()
-    print(f"\n🔍 Filtering files by prefix: '{path_filter}'")
+    # Show some sample paths for debugging
+    print(f"\n  Sample paths (first 10):")
+    for e in entries[:10]:
+        print(f"    {e['path']}")
 
+    # Step 2: Filter
+    print(f"\n🔍 Filtering by prefix: '{PATH_PREFIX}'")
     matching = []
-    skipped = 0
-    for entry in entries:
-        path = entry.get("path", "")
-        file_id = entry.get("id", "")
-        name = entry.get("name", "")
-        is_dir = entry.get("type") == "folder" or entry.get("type") == "directory"
+    for e in entries:
+        p = e["path"]
+        if PATH_PREFIX in p:
+            matching.append(e)
 
-        # Skip directories (gdown lists them but we only care about files)
-        if is_dir:
-            # But we still track directory entries for debugging
-            if path_filter in path:
-                matching.append(entry)
-            continue
-
-        # Check if file path matches our target prefix
-        if path_filter in path:
-            matching.append(entry)
-        else:
-            skipped += 1
-
-    print(f"  Matching: {len(matching)} files")
-    print(f"  Skipped:  {skipped} files (outside target system)")
+    print(f"  Matching files: {len(matching)}")
 
     if not matching:
-        print(f"\n[WARN] No files match prefix '{path_filter}'")
-        print("  First 10 available paths:")
-        for e in entries[:10]:
-            print(f"    {e.get('path', 'N/A')}")
+        # Show what paths are available for this system
+        print(f"\n[WARN] No files match prefix '{PATH_PREFIX}'")
+        print(f"  Available paths containing '{SYSTEM}':")
+        for e in entries:
+            if SYSTEM in e["path"]:
+                print(f"    {e['path']}")
         sys.exit(1)
 
     # Step 3: Download matching files
-    print(f"\n📥 Downloading {len(matching)} matching files...")
+    print(f"\n📥 Downloading {len(matching)} files...")
     success = 0
     failed = 0
-    total_size = 0
 
     for i, entry in enumerate(matching):
-        path = entry.get("path", "")
-        file_id = entry.get("id", "")
-        size_bytes = int(entry.get("size", 0))
-        total_size += size_bytes
-
-        # Determine output path under dataset/
+        path = entry["path"]
+        file_id = entry["id"]
         output_path = os.path.join("dataset", path)
 
-        if os.path.exists(output_path):
-            print(f"  [{i+1}/{len(matching)}] SKIP (exists): {path}")
-            success += 1
-            continue
-
-        size_mb = size_bytes / (1024 * 1024) if size_bytes else 0
-        print(f"  [{i+1}/{len(matching)}] {size_mb:.1f}MB  {path}")
-
-        if download_file(file_id, output_path):
+        print(f"  [{i+1}/{len(matching)}] {path}")
+        if download_one(file_id, output_path):
             success += 1
         else:
-            print(f"    ❌ Download failed!")
             failed += 1
 
-    total_gb = total_size / (1024 * 1024 * 1024)
-    print(f"\n📊 Download summary:")
-    print(f"  Total size:   {total_gb:.2f} GB")
-    print(f"  Downloaded:   {success} files")
-    if failed:
-        print(f"  Failed:       {failed} files")
+    print(f"\n📊 Summary: {success} downloaded, {failed} failed")
+
+    if failed > 0:
         sys.exit(1)
 
-    # Step 4: Run filter script to remove non-target dates
+    # Step 4: Run filter-dates.py to remove non-target dates
     print(f"\n📂 Running date-level filter...")
     subprocess.run(["python3", "scripts/filter-dates.py"], check=False)
 
-    # Report final size
+    # Report
     print(f"\n📊 Final dataset size:")
     subprocess.run(["du", "-sh", "dataset/"], check=False)
+    subprocess.run(["find", "dataset/", "-type", "d"], check=False)
 
     print(f"\n✅ Selective download complete for {SYSTEM}")
-    return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()
